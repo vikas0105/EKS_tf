@@ -1,56 +1,13 @@
-                           Terraform
-                              │
-               terraform init / plan / apply
-                              │
-                              ▼
-                    AWS Provider (ap-south-1)
-                              │
-         ┌────────────────────┴────────────────────┐
-         │                                         │
-         ▼                                         ▼
-      IAM Roles                              VPC Module
-(EKS & Node Group Roles)                         │
-                                                 │
-                     ┌───────────────────────────┼──────────────────────────┐
-                     │                           │                          │
-                     ▼                           ▼                          ▼
-              Public Subnets              Private Subnets             NAT Gateway
-                     │                           │
-                     └───────────────┬───────────┘
-                                     │
-                                     ▼
-                               EKS Cluster
-                          (Private API Endpoint)
-                                     │
-                      Control Plane (Managed by AWS)
-                                     │
-                          Security Groups + ENIs
-                                     │
-                                     ▼
-                        Managed Node Group
-                      (AL2023, t3.medium x 1)
-                                     │
-                                     ▼
-                            EC2 Worker Node
-                                     │
-                                     ▼
-                              Kubernetes
-                                     │
-                   ┌─────────────────┼──────────────────┐
-                   │                 │                  │
-                   ▼                 ▼                  ▼
-              kube-system       CoreDNS          kube-proxy
+# Terraform EKS Architecture
 
+This project provisions a **private Amazon EKS cluster** on AWS using Terraform.
 
-
-
-
-
-
+```text
 Terraform
 │
+├── AWS Provider
+│
 ├── VPC
-│   ├── CIDR
 │   ├── Public Subnets
 │   ├── Private Subnets
 │   ├── Internet Gateway
@@ -61,15 +18,49 @@ Terraform
 │   ├── EKS Cluster Role
 │   └── Node Group Role
 │
-├── EKS
-│   ├── Control Plane
+├── Amazon EKS
+│   ├── Private Control Plane
 │   ├── Security Groups
-│   └── OIDC Provider (if IRSA enabled)
+│   └── OIDC Provider (IRSA)
 │
 └── Managed Node Group
     ├── Auto Scaling Group
     ├── Launch Template
-    └── EC2 Instance(s)
+    └── EC2 Worker Node (AL2023, t3.medium)
+```
+
+## Deployment Flow
+
+```text
+Terraform
+      │
+terraform init
+terraform plan
+terraform apply
+      │
+      ▼
+AWS Provider
+      │
+      ▼
+VPC → IAM → EKS Cluster → Managed Node Group
+      │
+      ▼
+EC2 Worker Node joins the EKS Cluster
+      │
+      ▼
+Kubernetes Components (CoreDNS, kube-proxy, VPC CNI)
+```
+
+## Components
+
+* **Terraform** – Infrastructure as Code (IaC) provisioning.
+* **VPC** – Networking for the EKS cluster.
+* **IAM Roles** – Permissions for the EKS control plane and worker nodes.
+* **EKS Cluster** – Managed Kubernetes control plane with a private API endpoint.
+* **Managed Node Group** – Amazon Linux 2023 (`t3.medium`) worker node managed by AWS.
+* **OIDC Provider** – Enables IAM Roles for Service Accounts (IRSA).
+* **Kubernetes System Components** – CoreDNS, kube-proxy, and Amazon VPC CNI installed by EKS.
+
 
 
     
