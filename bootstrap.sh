@@ -112,10 +112,12 @@ echo ""
 # itself never moves. S3's ListObjectsV2/backend calls fail with a 301
 # redirect if you address the bucket using the wrong region, so we look up
 # the real region first and use that for everything below.
-BUCKET_LOCATION=$(aws s3api get-bucket-location --bucket "$BUCKET" --output text 2>/dev/null)
-GET_LOC_EXIT=$?
-
-if [ $GET_LOC_EXIT -eq 0 ]; then
+#
+# Note: this uses the `if VAR=$(cmd); then` form deliberately — assigning
+# inside the if-condition is safe under `set -e` (unlike capturing $? on a
+# separate line afterward, which causes the whole script to exit silently
+# the moment the command returns non-zero, before the next line even runs).
+if BUCKET_LOCATION=$(aws s3api get-bucket-location --bucket "$BUCKET" --output text 2>&1); then
   BUCKET_EXISTS=true
   if [ -z "$BUCKET_LOCATION" ] || [ "$BUCKET_LOCATION" = "None" ]; then
     # AWS quirk: get-bucket-location returns empty/None for us-east-1
@@ -177,20 +179,15 @@ else
 fi
 
 # ----- Connect Terraform to this backend -----
-# main.tf has an intentionally empty `backend "s3" {}` block.
-# We supply the real values here, every run, via -backend-config.
-# This is Terraform's built-in "partial configuration" feature —
-# nothing in the repo ever needs to change for this to work.
+# main.tf now has the real bucket/key/region/table values hardcoded
+# (fixed for this AWS account), so a plain `terraform init` works
+# correctly with zero flags — including if you (or anyone) ever runs
+# `terraform init` directly instead of this script.
 echo ""
 echo "Running terraform init..."
 echo ""
 
-terraform init -reconfigure \
-  -backend-config="bucket=${BUCKET}" \
-  -backend-config="key=${KEY}" \
-  -backend-config="region=${REGION}" \
-  -backend-config="dynamodb_table=${TABLE}" \
-  -backend-config="encrypt=true"
+terraform init -reconfigure
 
 echo ""
 echo "=========================================="

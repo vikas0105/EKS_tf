@@ -23,14 +23,19 @@ terraform {
   # ============================================
   # Remote state (S3 + DynamoDB)
   # ============================================
-  # This block is intentionally empty — bucket/key/region/table are
-  # supplied at `terraform init` time via -backend-config flags, run
-  # automatically by ./bootstrap.sh. This file never needs to be edited
-  # or committed again after the initial upload: the same script works
-  # identically on this clone, a new CloudShell session, or any machine,
-  # because the bucket name is deterministic (derived from your AWS
-  # account ID) and bootstrap.sh re-creates/reuses it every time.
-  backend "s3" {}
+  # These values are fixed for this AWS account/region. A plain
+  # `terraform init` now works correctly with zero prompts and zero
+  # flags — no need to remember to run ./bootstrap.sh just for backend
+  # wiring. (bootstrap.sh still creates the bucket/table if they don't
+  # exist yet, and installs Terraform if missing — run it once, or any
+  # time you're unsure the bucket/table exist.)
+  backend "s3" {
+    bucket         = "eks-tf-state-157328692630"
+    key            = "eks/terraform.tfstate"
+    region         = "ap-south-1"
+    encrypt        = true
+    dynamodb_table = "eks-tf-locks"
+  }
 }
 
 # Configure AWS Provider
