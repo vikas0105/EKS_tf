@@ -1,197 +1,188 @@
-# ============================================
-# ALB Controller Module - Load Balancer Management
-# ============================================
-# Note: deployed into "kube-system", which already exists on every EKS
-# cluster by default — so there is no kubernetes_namespace resource here.
-# Creating one would fail with "namespace already exists".
+terraform {
+  required_version = ">= 1.0"
+  
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+    helm = {
+      source  = "hashicorp/helm"
+      version = "~> 2.11"
+    }
+    kubectl = {
+      source  = "gavinbunney/kubectl"
+      version = "~> 1.14"
+    }
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 4.0"
+    }
+  }
 
-# ============================================
-# IAM Role for ALB Controller (IRSA)
-# ============================================
-resource "aws_iam_role" "alb_controller" {
-  name = "${var.cluster_name}-alb-controller-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Principal = {
-          Federated = var.oidc_provider_arn
-        }
-        Action = "sts:AssumeRoleWithWebIdentity"
-        Condition = {
-          StringEquals = {
-            "${replace(var.oidc_provider_url, "https://", "")}:sub" = "system:serviceaccount:kube-system:aws-load-balancer-controller"
-            "${replace(var.oidc_provider_url, "https://", "")}:aud" = "sts.amazonaws.com"
-          }
-        }
-      }
-    ]
-  })
-
-  tags = var.tags
+  # ============================================
+  # Remote state (S3 + DynamoDB)
+  # ============================================
+  # These values are fixed for this AWS account/region. A plain
+  # `terraform init` now works correctly with zero prompts and zero
+  # flags — no need to remember to run ./bootstrap.sh just for backend
+  # wiring. (bootstrap.sh still creates the bucket/table if they don't
+  # exist yet, and installs Terraform if missing — run it once, or any
+  # time you're unsure the bucket/table exist.)
+  backend "s3" {
+    bucket         = "eks-tf-state-157328692630"
+    key            = "eks/terraform.tfstate"
+    region         = "ap-south-1"
+    encrypt        = true
+    dynamodb_table = "eks-tf-locks"
+  }
 }
 
-# ============================================
-# IAM Policy for ALB Controller
-# ============================================
-resource "aws_iam_policy" "alb_controller" {
-  name        = "${var.cluster_name}-alb-controller-policy"
-  description = "IAM policy for ALB Ingress Controller"
+# Configure AWS Provider
+provider "aws" {
+  region = var.aws_region
 
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "elbv2:CreateLoadBalancer",
-          "elbv2:CreateTargetGroup",
-          "elbv2:CreateListener",
-          "elbv2:DeleteLoadBalancer",
-          "elbv2:DeleteTargetGroup",
-          "elbv2:DeleteListener",
-          "elbv2:DescribeLoadBalancers",
-          "elbv2:DescribeTargetGroups",
-          "elbv2:DescribeListeners",
-          "elbv2:DescribeLoadBalancerAttributes",
-          "elbv2:DescribeTargetGroupAttributes",
-          "elbv2:ModifyLoadBalancerAttributes",
-          "elbv2:ModifyTargetGroupAttributes",
-          "elbv2:RegisterTargets",
-          "elbv2:DeregisterTargets",
-          "elbv2:DescribeTargetHealth",
-          "elbv2:ModifyListener"
-        ]
-        Resource = "*"
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "ec2:AuthorizeSecurityGroupIngress",
-          "ec2:RevokeSecurityGroupIngress",
-          "ec2:DescribeSecurityGroups",
-          "ec2:DescribeInstances",
-          "ec2:DescribeNetworkInterfaces",
-          "ec2:DescribeTags",
-          "ec2:GetCoarseGrainedInstanceMetadata"
-        ]
-        Resource = "*"
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "cognito-idp:DescribeUserPoolClient"
-        ]
-        Resource = "*"
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "acm:ListCertificates",
-          "acm:DescribeCertificate"
-        ]
-        Resource = "*"
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "wafv2:GetWebACL",
-          "wafv2:GetWebACLForResource",
-          "wafv2:AssociateWebACL",
-          "wafv2:DisassociateWebACL"
-        ]
-        Resource = "*"
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "waf:GetWebACL"
-        ]
-        Resource = "*"
-      }
-    ]
-  })
-
-  tags = var.tags
-}
-
-# Attach policy to role
-resource "aws_iam_role_policy_attachment" "alb_controller" {
-  policy_arn = aws_iam_policy.alb_controller.arn
-  role       = aws_iam_role.alb_controller.name
-}
-
-# ============================================
-# Service Account for ALB Controller
-# ============================================
-resource "kubernetes_service_account_v1" "alb_controller" {
-  metadata {
-    name      = "aws-load-balancer-controller"
-    namespace = "kube-system"
-    annotations = {
-      "eks.amazonaws.com/role-arn" = aws_iam_role.alb_controller.arn
+  default_tags {
+    tags = {
+      Terraform   = "true"
+      Environment = var.environment
+      Project     = var.project_name
     }
   }
 }
 
-# ============================================
-# Helm Release for ALB Controller
-# ============================================
-resource "helm_release" "alb_controller" {
-  name       = "aws-load-balancer-controller"
-  repository = "https://aws.github.io/eks-charts"
-  chart      = "aws-load-balancer-controller"
-  namespace  = "kube-system"
-  version    = var.alb_controller_chart_version
+# Configure Helm Provider
+provider "helm" {
+  kubernetes {
+    host                   = module.eks.cluster_endpoint
+    cluster_ca_certificate = base64decode(module.eks.cluster_ca_certificate)
+    token                  = data.aws_eks_cluster_auth.main.token
+  }
+}
 
-  values = [
-    jsonencode({
-      replicaCount = var.alb_controller_replicas
-      
-      serviceAccount = {
-        create = false
-        name   = kubernetes_service_account_v1.alb_controller.metadata[0].name
-      }
+# Configure Kubernetes Provider
+# Required by the alb_controller module's kubernetes_service_account resource
+provider "kubernetes" {
+  host                   = module.eks.cluster_endpoint
+  cluster_ca_certificate = base64decode(module.eks.cluster_ca_certificate)
+  token                  = data.aws_eks_cluster_auth.main.token
+}
 
-      clusterName = var.cluster_name
+# Configure kubectl Provider
+provider "kubectl" {
+  host                   = module.eks.cluster_endpoint
+  cluster_ca_certificate = base64decode(module.eks.cluster_ca_certificate)
+  token                  = data.aws_eks_cluster_auth.main.token
+  load_config_file       = false
+}
 
-      # Enable logging
-      logLevel = "info"
-
-      # Resource requests and limits
-      resources = {
-        limits = {
-          cpu    = "200m"
-          memory = "500Mi"
-        }
-        requests = {
-          cpu    = "100m"
-          memory = "200Mi"
-        }
-      }
-
-      # Pod anti-affinity for high availability
-      podAntiAffinity = "preferred"
-
-      # Enable webhook
-      enableShield       = false
-      enableWaf          = false
-      enableWafv2        = false
-
-      env = {
-        AWS_REGION = data.aws_region.current.name
-      }
-    })
-  ]
-
-  depends_on = [
-    kubernetes_service_account_v1.alb_controller
-  ]
+# Get cluster auth token
+data "aws_eks_cluster_auth" "main" {
+  name = module.eks.cluster_name
 }
 
 # ============================================
-# Data Sources
+# VPC Module
 # ============================================
-data "aws_region" "current" {}
+module "vpc" {
+  source = "./modules/vpc"
+
+  aws_region    = var.aws_region
+  environment   = var.environment
+  project_name  = var.project_name
+  vpc_cidr      = var.vpc_cidr
+
+  tags = merge(
+    var.tags,
+    {
+      Module = "vpc"
+    }
+  )
+}
+
+# ============================================
+# EKS Cluster Module
+# ============================================
+module "eks" {
+  source = "./modules/eks"
+
+  cluster_name    = "${var.project_name}-${var.environment}"
+  cluster_version = var.cluster_version
+  vpc_id          = module.vpc.vpc_id
+
+  # Network configuration
+  subnet_ids              = concat(module.vpc.public_subnet_ids, module.vpc.private_subnet_ids)
+  control_plane_subnet_ids = module.vpc.private_subnet_ids
+
+  # Security
+  security_group_ids = [module.vpc.vpc_default_security_group_id]
+
+  # Logging
+  cluster_enabled_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
+
+  tags = merge(
+    var.tags,
+    {
+      Module = "eks"
+    }
+  )
+}
+
+# ============================================
+# Node Group Module
+# ============================================
+module "node_group" {
+  source = "./modules/node_group"
+
+  cluster_name    = module.eks.cluster_name
+  cluster_version = var.cluster_version
+  
+  # Node group configuration
+  node_group_name = "${var.project_name}-${var.environment}-nodes"
+  instance_type   = var.instance_type
+  capacity_type   = var.capacity_type
+
+  # Scaling
+  min_size     = var.node_group_min_size
+  desired_size = var.node_group_desired_size
+  max_size     = var.node_group_max_size
+
+  # Subnets (use private subnets for security)
+  subnet_ids = module.vpc.private_subnet_ids
+
+  # Tags
+  tags = merge(
+    var.tags,
+    {
+      Module = "node_group"
+    }
+  )
+
+  depends_on = [module.eks]
+}
+
+# ============================================
+# ALB Controller Module
+# ============================================
+module "alb_controller" {
+  source = "./modules/alb_controller"
+
+  cluster_name = module.eks.cluster_name
+  oidc_provider_arn = module.eks.oidc_provider_arn
+  oidc_provider_url = module.eks.oidc_provider_url
+
+  # VPC configuration for ALB to find subnets
+  vpc_id = module.vpc.vpc_id
+
+  tags = merge(
+    var.tags,
+    {
+      Module = "alb_controller"
+    }
+  )
+
+  depends_on = [
+    module.eks,
+    module.node_group
+  ]
+}
