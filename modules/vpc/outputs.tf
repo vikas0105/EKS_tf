@@ -39,6 +39,6 @@ output "vpc_default_security_group_id" {
 }
 
 output "availability_zones" {
-  description = "List of available AZs in the region"
-  value       = data.aws_availability_zones.available.names
+  description = "AZs actually used by this VPC (capped at 2, regardless of how many the region offers)"
+  value       = local.azs
 }

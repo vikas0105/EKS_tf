@@ -126,7 +126,7 @@ resource "aws_iam_role_policy_attachment" "alb_controller" {
 # ============================================
 # Service Account for ALB Controller
 # ============================================
-resource "kubernetes_service_account" "alb_controller" {
+resource "kubernetes_service_account_v1" "alb_controller" {
   metadata {
     name      = "aws-load-balancer-controller"
     namespace = "kube-system"
@@ -152,7 +152,7 @@ resource "helm_release" "alb_controller" {
       
       serviceAccount = {
         create = false
-        name   = kubernetes_service_account.alb_controller.metadata[0].name
+        name   = kubernetes_service_account_v1.alb_controller.metadata[0].name
       }
 
       clusterName = var.cluster_name
@@ -187,7 +187,7 @@ resource "helm_release" "alb_controller" {
   ]
 
   depends_on = [
-    kubernetes_service_account.alb_controller
+    kubernetes_service_account_v1.alb_controller
   ]
 }
 

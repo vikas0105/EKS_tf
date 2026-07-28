@@ -2,6 +2,19 @@
 # VPC Module - Network Infrastructure
 # ============================================
 
+# Cap the number of AZs used to 2, regardless of how many the region
+# actually has available. This keeps the architecture and cost
+# predictable (2 public + 2 private subnets, 2 NAT gateways) instead of
+# scaling to however many AZs a given region happens to offer — some
+# regions (e.g. ap-south-1) have more than 4, which previously caused
+# private subnet CIDRs to collide with public ones (the offset math
+# assumed a max of 4 AZs) and would have silently created far more NAT
+# gateways than intended.
+locals {
+  az_count = min(2, length(data.aws_availability_zones.available.names))
+  azs      = slice(data.aws_availability_zones.available.names, 0, local.az_count)
+}
+
 # VPC
 resource "aws_vpc" "main" {
   cidr_block           = var.vpc_cidr
@@ -32,10 +45,10 @@ resource "aws_internet_gateway" "main" {
 # Public Subnets (for NAT gateways and bastion)
 # ============================================
 resource "aws_subnet" "public" {
-  count                   = length(data.aws_availability_zones.available.names)
+  count                   = local.az_count
   vpc_id                  = aws_vpc.main.id
   cidr_block              = cidrsubnet(var.vpc_cidr, 4, count.index)
-  availability_zone       = data.aws_availability_zones.available.names[count.index]
+  availability_zone       = local.azs[count.index]
   map_public_ip_on_launch = true
 
   tags = merge(
@@ -52,10 +65,10 @@ resource "aws_subnet" "public" {
 # Private Subnets (for EKS nodes)
 # ============================================
 resource "aws_subnet" "private" {
-  count             = length(data.aws_availability_zones.available.names)
+  count             = local.az_count
   vpc_id            = aws_vpc.main.id
-  cidr_block        = cidrsubnet(var.vpc_cidr, 4, count.index + 4)
-  availability_zone = data.aws_availability_zones.available.names[count.index]
+  cidr_block        = cidrsubnet(var.vpc_cidr, 4, count.index + local.az_count)
+  availability_zone = local.azs[count.index]
 
   tags = merge(
     var.tags,
@@ -71,7 +84,7 @@ resource "aws_subnet" "private" {
 # Elastic IPs for NAT Gateways
 # ============================================
 resource "aws_eip" "nat" {
-  count  = length(data.aws_availability_zones.available.names)
+  count  = local.az_count
   domain = "vpc"
 
   depends_on = [aws_internet_gateway.main]
@@ -88,7 +101,7 @@ resource "aws_eip" "nat" {
 # NAT Gateways (for private subnet internet access)
 # ============================================
 resource "aws_nat_gateway" "main" {
-  count         = length(data.aws_availability_zones.available.names)
+  count         = local.az_count
   allocation_id = aws_eip.nat[count.index].id
   subnet_id     = aws_subnet.public[count.index].id
 
@@ -132,7 +145,7 @@ resource "aws_route_table_association" "public" {
 # Private Route Tables (one per AZ for NAT)
 # ============================================
 resource "aws_route_table" "private" {
-  count  = length(data.aws_availability_zones.available.names)
+  count  = local.az_count
   vpc_id = aws_vpc.main.id
 
   route {

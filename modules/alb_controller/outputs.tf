@@ -15,12 +15,12 @@ output "alb_controller_policy_arn" {
 
 output "service_account_name" {
   description = "Kubernetes service account name for ALB controller"
-  value       = kubernetes_service_account.alb_controller.metadata[0].name
+  value       = kubernetes_service_account_v1.alb_controller.metadata[0].name
 }
 
 output "namespace" {
   description = "Kubernetes namespace where ALB controller is deployed"
-  value       = kubernetes_service_account.alb_controller.metadata[0].namespace
+  value       = kubernetes_service_account_v1.alb_controller.metadata[0].namespace
 }
 
 output "helm_release_status" {
