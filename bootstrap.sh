@@ -2,20 +2,15 @@
 set -e
 
 # ============================================
-# Bootstrap + Connect to Remote State
+# Bootstrap: install Terraform if needed,
+# verify remote state is reachable, connect.
 # ============================================
-# Run this every time after cloning — in a fresh CloudShell session,
-# a new machine, wherever. It's fully idempotent:
-#
-#   - If the S3 bucket / DynamoDB table don't exist yet, it creates them.
-#   - If they already exist, it just reuses them.
-#   - Either way, it runs `terraform init` pointed at that same bucket.
-#
-# The bucket/table names are DETERMINISTIC — derived from your AWS
-# account ID, which never changes — so this script always reconnects
-# to the exact same state, with zero manual input and zero file edits.
-#
-# main.tf itself is never modified. Nothing needs to be committed.
+# main.tf has the real S3 backend values (bucket/region/table) hardcoded
+# for this AWS account, so this script's only jobs are:
+#   1. Install Terraform if it's missing
+#   2. Verify the state bucket + lock table are reachable (READ-ONLY —
+#      this never creates them; they already exist)
+#   3. Run `terraform init`
 #
 # Usage: ./bootstrap.sh
 
@@ -74,16 +69,16 @@ install_terraform() {
   esac
 
   if command -v terraform &>/dev/null; then
-    echo -e "${GREEN}✓ Terraform installed: $(terraform version | head -n1)${NC}"
+    echo -e "${GREEN}Terraform installed: $(terraform version | head -n1)${NC}"
   else
-    echo -e "${RED}✗ Terraform installation failed — install manually and re-run this script${NC}"
+    echo -e "${RED}Terraform installation failed — install manually and re-run this script${NC}"
     exit 1
   fi
   echo ""
 }
 
 if command -v terraform &>/dev/null; then
-  echo -e "${GREEN}✓ Terraform already installed: $(terraform version | head -n1)${NC}"
+  echo -e "${GREEN}Terraform already installed: $(terraform version | head -n1)${NC}"
   echo ""
 else
   install_terraform
@@ -94,95 +89,64 @@ echo "  Connecting to Terraform Remote State"
 echo "=========================================="
 echo ""
 
-# ----- Config (deterministic — same every run) -----
-ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-BUCKET="eks-tf-state-${ACCOUNT_ID}"
-TABLE="eks-tf-locks"
-KEY="eks/terraform.tfstate"
-
-echo "Account:  $ACCOUNT_ID"
-echo "Bucket:   $BUCKET"
-echo "Table:    $TABLE"
-echo ""
-
-# ----- Discover the bucket's ACTUAL region, if it already exists -----
-# Important: this does NOT trust the current session's $AWS_REGION blindly.
-# CloudShell sets AWS_REGION based on whichever region is currently selected
-# in the console — that can differ between sessions even though the bucket
-# itself never moves. S3's ListObjectsV2/backend calls fail with a 301
-# redirect if you address the bucket using the wrong region, so we look up
-# the real region first and use that for everything below.
+# ----- Fixed values (this account's state bucket already exists) -----
+# main.tf has these same values hardcoded in its backend "s3" {} block,
+# so this script does not create or auto-detect anything — it only
+# verifies the bucket/table are reachable, then runs terraform init.
 #
-# Note: this uses the `if VAR=$(cmd); then` form deliberately — assigning
-# inside the if-condition is safe under `set -e` (unlike capturing $? on a
-# separate line afterward, which causes the whole script to exit silently
-# the moment the command returns non-zero, before the next line even runs).
-if BUCKET_LOCATION=$(aws s3api get-bucket-location --bucket "$BUCKET" --output text 2>&1); then
-  BUCKET_EXISTS=true
-  if [ -z "$BUCKET_LOCATION" ] || [ "$BUCKET_LOCATION" = "None" ]; then
-    # AWS quirk: get-bucket-location returns empty/None for us-east-1
-    REGION="us-east-1"
-  else
-    REGION="$BUCKET_LOCATION"
-  fi
-  echo -e "${YELLOW}Found existing state bucket — it lives in region: ${REGION}${NC}"
-  echo "(using that region, regardless of this session's current AWS_REGION)"
-else
-  BUCKET_EXISTS=false
-  REGION="${AWS_REGION:-us-east-1}"
-  echo "No existing state bucket found — will create one in: $REGION"
-fi
+# (An earlier version of this script tried to auto-detect/auto-create
+# the bucket on every run. That was removed: a transient failure in the
+# detection step could cause it to attempt creating a bucket that
+# already existed, which AWS correctly rejects with a confusing error.
+# Since the bucket is known to already exist, creation is never needed
+# again — only a read-only reachability check.)
+BUCKET="eks-tf-state-157328692630"
+TABLE="eks-tf-locks"
+REGION="ap-south-1"
+
+echo "Bucket:  $BUCKET"
+echo "Table:   $TABLE"
+echo "Region:  $REGION"
 echo ""
 
-# ----- Create S3 bucket (only if it doesn't exist) -----
-if [ "$BUCKET_EXISTS" = true ]; then
-  echo -e "${YELLOW}Bucket already exists — reusing it${NC}"
+# ----- Verify the bucket is reachable (read-only, never creates anything) -----
+echo "Verifying state bucket is reachable..."
+if aws s3api head-bucket --bucket "$BUCKET" --region "$REGION" 2>/tmp/bootstrap_bucket_err; then
+  echo -e "${GREEN}Bucket reachable${NC}"
 else
-  echo "Bucket doesn't exist yet, creating in $REGION..."
-  if [ "$REGION" = "us-east-1" ]; then
-    aws s3api create-bucket --bucket "$BUCKET" --region "$REGION"
-  else
-    aws s3api create-bucket --bucket "$BUCKET" --region "$REGION" \
-      --create-bucket-configuration LocationConstraint="$REGION"
-  fi
-
-  aws s3api put-bucket-versioning --bucket "$BUCKET" \
-    --versioning-configuration Status=Enabled
-
-  aws s3api put-public-access-block --bucket "$BUCKET" \
-    --public-access-block-configuration \
-    "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
-
-  aws s3api put-bucket-encryption --bucket "$BUCKET" \
-    --server-side-encryption-configuration '{
-      "Rules": [{"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}]
-    }'
-
-  echo -e "${GREEN}✓ Bucket created (versioned, encrypted, private)${NC}"
+  echo -e "${RED}Could not reach bucket '${BUCKET}' in region '${REGION}'${NC}"
+  echo ""
+  echo "Actual AWS error:"
+  cat /tmp/bootstrap_bucket_err
+  echo ""
+  echo "This script does not auto-create the bucket, since it should"
+  echo "already exist. Troubleshooting steps:"
+  echo "  1. List your buckets:   aws s3api list-buckets --query \"Buckets[].Name\""
+  echo "  2. Confirm its region:  aws s3api get-bucket-location --bucket ${BUCKET}"
+  echo "  3. Check IAM permissions for s3:GetObject / s3:ListBucket on this bucket"
+  rm -f /tmp/bootstrap_bucket_err
+  exit 1
 fi
+rm -f /tmp/bootstrap_bucket_err
+echo ""
 
-# ----- Create DynamoDB lock table (only if it doesn't exist) -----
+# ----- Verify the DynamoDB lock table is reachable (read-only) -----
+echo "Verifying lock table is reachable..."
 if aws dynamodb describe-table --table-name "$TABLE" --region "$REGION" &>/dev/null; then
-  echo -e "${YELLOW}Lock table already exists — reusing it${NC}"
+  echo -e "${GREEN}Table reachable${NC}"
 else
-  echo "Lock table doesn't exist yet, creating..."
-  aws dynamodb create-table \
-    --table-name "$TABLE" \
-    --attribute-definitions AttributeName=LockID,AttributeType=S \
-    --key-schema AttributeName=LockID,KeyType=HASH \
-    --provisioned-throughput ReadCapacityUnits=5,WriteCapacityUnits=5 \
-    --region "$REGION" > /dev/null
-
-  echo "Waiting for table to become active..."
-  aws dynamodb wait table-exists --table-name "$TABLE" --region "$REGION"
-  echo -e "${GREEN}✓ Table created${NC}"
+  echo -e "${RED}Could not reach table '${TABLE}' in region '${REGION}'${NC}"
+  echo ""
+  echo "This script does not auto-create the table, since it should"
+  echo "already exist. Check IAM permissions for dynamodb:DescribeTable."
+  exit 1
 fi
 
 # ----- Connect Terraform to this backend -----
-# main.tf now has the real bucket/key/region/table values hardcoded
-# (fixed for this AWS account), so a plain `terraform init` works
-# correctly with zero flags — including if you (or anyone) ever runs
-# `terraform init` directly instead of this script.
+# main.tf has the real bucket/key/region/table values hardcoded, so a
+# plain `terraform init` works correctly with zero flags — including
+# if you (or anyone) ever runs `terraform init` directly instead of
+# this script.
 echo ""
 echo "Running terraform init..."
 echo ""
@@ -191,7 +155,7 @@ terraform init -reconfigure
 
 echo ""
 echo "=========================================="
-echo -e "${GREEN}✓ Connected to remote state${NC}"
+echo -e "${GREEN}Connected to remote state${NC}"
 echo "=========================================="
 echo ""
 echo "Next:"
