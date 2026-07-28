@@ -131,8 +131,12 @@ export AWS_REGION="us-west-2"
 
 ## What bootstrap.sh does, every time you run it
 
-1. Checks if the S3 bucket `eks-tf-state-<your-account-id>` exists — creates it (versioned, encrypted, private) only if it doesn't
-2. Checks if the DynamoDB table `eks-tf-locks` exists — creates it only if it doesn't
-3. Runs `terraform init -reconfigure` with the bucket/table passed in as `-backend-config` flags
+1. Checks if Terraform is installed — installs it automatically if not (Amazon Linux via yum/dnf, Ubuntu/Debian via apt, or a direct binary download as a generic fallback)
+2. **Discovers the actual region of the S3 state bucket if it already exists** — rather than trusting the current session's `AWS_REGION`. This matters because CloudShell sets `AWS_REGION` based on whichever region is currently selected in the console, which can differ session to session even though your bucket never moves. Using the wrong region causes an S3 "301 redirect" error.
+3. Checks if the S3 bucket `eks-tf-state-<your-account-id>` exists — creates it (versioned, encrypted, private) only if it doesn't, in the current session's region
+4. Checks if the DynamoDB table `eks-tf-locks` exists in that same (correct) region — creates it only if it doesn't
+5. Runs `terraform init -reconfigure` with the bucket/table/region passed in as `-backend-config` flags
 
-Nothing in the repo is ever modified. Safe to run as many times as you want, from as many sessions as you want.
+Nothing in the repo is ever modified. Safe to run as many times as you want, from as many sessions, regions, or machines as you want.
+
+> **Note on a harmless warning:** newer Terraform versions print `The parameter "dynamodb_table" is deprecated. Use parameter "use_lockfile" instead.` This is just Terraform nudging toward its newer native S3-locking mechanism (added in 1.11+) — the DynamoDB-based locking used here still works correctly on all Terraform versions, old and new. Safe to ignore.

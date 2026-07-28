@@ -96,22 +96,47 @@ echo ""
 
 # ----- Config (deterministic — same every run) -----
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-REGION="${AWS_REGION:-us-east-1}"
 BUCKET="eks-tf-state-${ACCOUNT_ID}"
 TABLE="eks-tf-locks"
 KEY="eks/terraform.tfstate"
 
 echo "Account:  $ACCOUNT_ID"
-echo "Region:   $REGION"
 echo "Bucket:   $BUCKET"
 echo "Table:    $TABLE"
 echo ""
 
+# ----- Discover the bucket's ACTUAL region, if it already exists -----
+# Important: this does NOT trust the current session's $AWS_REGION blindly.
+# CloudShell sets AWS_REGION based on whichever region is currently selected
+# in the console — that can differ between sessions even though the bucket
+# itself never moves. S3's ListObjectsV2/backend calls fail with a 301
+# redirect if you address the bucket using the wrong region, so we look up
+# the real region first and use that for everything below.
+BUCKET_LOCATION=$(aws s3api get-bucket-location --bucket "$BUCKET" --output text 2>/dev/null)
+GET_LOC_EXIT=$?
+
+if [ $GET_LOC_EXIT -eq 0 ]; then
+  BUCKET_EXISTS=true
+  if [ -z "$BUCKET_LOCATION" ] || [ "$BUCKET_LOCATION" = "None" ]; then
+    # AWS quirk: get-bucket-location returns empty/None for us-east-1
+    REGION="us-east-1"
+  else
+    REGION="$BUCKET_LOCATION"
+  fi
+  echo -e "${YELLOW}Found existing state bucket — it lives in region: ${REGION}${NC}"
+  echo "(using that region, regardless of this session's current AWS_REGION)"
+else
+  BUCKET_EXISTS=false
+  REGION="${AWS_REGION:-us-east-1}"
+  echo "No existing state bucket found — will create one in: $REGION"
+fi
+echo ""
+
 # ----- Create S3 bucket (only if it doesn't exist) -----
-if aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null; then
+if [ "$BUCKET_EXISTS" = true ]; then
   echo -e "${YELLOW}Bucket already exists — reusing it${NC}"
 else
-  echo "Bucket doesn't exist yet, creating..."
+  echo "Bucket doesn't exist yet, creating in $REGION..."
   if [ "$REGION" = "us-east-1" ]; then
     aws s3api create-bucket --bucket "$BUCKET" --region "$REGION"
   else
