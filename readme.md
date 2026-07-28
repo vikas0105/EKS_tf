@@ -63,4 +63,12 @@ Kubernetes Components (CoreDNS, kube-proxy, VPC CNI)
 
 
 
+curl -o terraform.zip https://releases.hashicorp.com/terraform/1.7.5/terraform_1.7.5_linux_amd64.zip
+unzip terraform.zip
+mkdir -p ~/bin && mv terraform ~/bin/
+echo 'export PATH=~/bin:$PATH' >> ~/.bashrc && source ~/.bashrc
+terraform --version
+
+
+
     
