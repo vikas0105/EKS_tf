@@ -42,6 +42,11 @@
               kube-system       CoreDNS          kube-proxy
 
 
+
+
+
+
+
 Terraform
 │
 ├── VPC
