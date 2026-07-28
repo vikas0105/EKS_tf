@@ -45,7 +45,14 @@ module "node_group" {
   cluster_version    = var.cluster_version
   tags               = local.common_tags
 
-  depends_on = [module.eks]
+  # Must wait for the FULL vpc module (NAT Gateway + private route table
+  # associations), not just subnet creation. Referencing
+  # module.vpc.private_subnet_ids above only creates a dependency on the
+  # subnet resources themselves -- NAT/routes are separate resources in that
+  # module and can otherwise be created in parallel with the node group,
+  # letting nodes launch before they have internet egress to reach ECR/STS
+  # and bootstrap, which causes repeated failures/retries.
+  depends_on = [module.eks, module.vpc]
 }
 
 module "alb_controller" {
