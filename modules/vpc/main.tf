@@ -209,6 +209,22 @@ resource "aws_security_group" "default" {
   )
 }
 
+# Optional: allow a CloudShell VPC environment (or other bastion/jump
+# network) to reach the EKS API on 443. This is the SG actually attached
+# to the cluster (via root main.tf's security_group_ids), unlike the
+# unused aws_security_group.cluster resource in the eks module. Only
+# created when cloudshell_sg_id is set — safe to leave null.
+resource "aws_security_group_rule" "cloudshell_to_cluster" {
+  count                    = var.cloudshell_sg_id == null ? 0 : 1
+  type                     = "ingress"
+  from_port                = 443
+  to_port                  = 443
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.default.id
+  source_security_group_id = var.cloudshell_sg_id
+  description               = "Allow CloudShell VPC environment to reach EKS API"
+}
+
 # ============================================
 # Data Sources
 # ============================================

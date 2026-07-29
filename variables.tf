@@ -113,6 +113,15 @@ variable "node_group_max_size" {
 }
 
 # ============================================
+# CloudShell VPC Environment (optional)
+# ============================================
+variable "cloudshell_sg_id" {
+  description = "Security group ID of a CloudShell VPC environment, allowed to reach the private EKS API endpoint on 443. Set this only after creating the SG (see README) — leave null/unset otherwise."
+  type        = string
+  default     = null
+}
+
+# ============================================
 # Tags
 # ============================================
 variable "tags" {

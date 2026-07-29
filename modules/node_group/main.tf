@@ -60,6 +60,7 @@ resource "aws_eks_node_group" "main" {
   # Instance configuration
   instance_types = [var.instance_type]
   capacity_type  = var.capacity_type
+  ami_type       = var.ami_type
   version        = var.cluster_version
 
   # Scaling configuration

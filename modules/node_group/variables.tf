@@ -25,6 +25,12 @@ variable "capacity_type" {
   default     = "ON_DEMAND"
 }
 
+variable "ami_type" {
+  description = "AMI type for worker nodes. Assignment requires Amazon Linux 2023 (AL2023)."
+  type        = string
+  default     = "AL2023_x86_64_STANDARD"
+}
+
 variable "min_size" {
   description = "Minimum number of nodes"
   type        = number

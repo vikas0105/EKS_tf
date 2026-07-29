@@ -87,10 +87,11 @@ data "aws_eks_cluster_auth" "main" {
 module "vpc" {
   source = "./modules/vpc"
 
-  aws_region    = var.aws_region
-  environment   = var.environment
-  project_name  = var.project_name
-  vpc_cidr      = var.vpc_cidr
+  aws_region       = var.aws_region
+  environment      = var.environment
+  project_name     = var.project_name
+  vpc_cidr         = var.vpc_cidr
+  cloudshell_sg_id = var.cloudshell_sg_id
 
   tags = merge(
     var.tags,
@@ -111,8 +112,14 @@ module "eks" {
   vpc_id          = module.vpc.vpc_id
 
   # Network configuration
-  subnet_ids              = concat(module.vpc.public_subnet_ids, module.vpc.private_subnet_ids)
-  control_plane_subnet_ids = module.vpc.private_subnet_ids
+  # Private cluster: control plane ENIs live only in private subnets.
+  # (Previously this concatenated public + private subnets, which placed
+  # some control plane ENIs in public subnets — endpoint_public_access
+  # stays false either way so the API itself was never internet-reachable,
+  # but this keeps the network placement consistent with the private
+  # cluster design and matches AWS's recommended pattern.)
+  subnet_ids                = module.vpc.private_subnet_ids
+  control_plane_subnet_ids  = module.vpc.private_subnet_ids
 
   # Security
   security_group_ids = [module.vpc.vpc_default_security_group_id]
@@ -158,7 +165,14 @@ module "node_group" {
     }
   )
 
-  depends_on = [module.eks]
+  # Must depend on the FULL vpc module (NAT Gateways + route table
+  # associations), not just module.eks. Referencing
+  # module.vpc.private_subnet_ids above only creates a dependency on the
+  # subnet resources themselves — NAT/routes are separate resources and
+  # could otherwise be created in parallel with the node group, letting
+  # nodes launch before they have internet egress to reach ECR/STS and
+  # bootstrap. This caused a 20+ minute stuck "Creating..." node group.
+  depends_on = [module.eks, module.vpc]
 }
 
 # ============================================
