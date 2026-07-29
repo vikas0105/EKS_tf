@@ -11,11 +11,19 @@ resource "aws_eks_cluster" "main" {
   role_arn = aws_iam_role.cluster.arn
 
   vpc_config {
-    subnet_ids              = var.subnet_ids
-    # Private cluster - only private API endpoint
-    endpoint_private_access = true
-    endpoint_public_access  = false
-    security_group_ids      = var.security_group_ids
+    subnet_ids               = var.subnet_ids
+    endpoint_private_access  = true
+    # Defaults to false (private-only, per assignment spec). Toggle
+    # temporarily via -var flags when you need Terraform/kubectl/helm to
+    # reach the API from outside the VPC (e.g. plain CloudShell), then
+    # re-apply with the defaults to lock it back down:
+    #   terraform apply -var="enable_public_access=true" \
+    #     -var='public_access_cidrs=["<your-ip>/32"]'
+    #   ...then, once done...
+    #   terraform apply
+    endpoint_public_access   = var.enable_public_access
+    public_access_cidrs      = var.enable_public_access ? var.public_access_cidrs : null
+    security_group_ids       = var.security_group_ids
   }
 
   enabled_cluster_log_types = var.cluster_enabled_log_types

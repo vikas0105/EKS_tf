@@ -35,6 +35,18 @@ variable "vpc_id" {
   default     = ""
 }
 
+variable "enable_public_access" {
+  description = "Whether the EKS API endpoint is also reachable publicly (restricted by public_access_cidrs). Default false = private-only, per assignment spec. Set true temporarily to run terraform/kubectl/helm from outside the VPC (e.g. plain CloudShell)."
+  type        = bool
+  default     = false
+}
+
+variable "public_access_cidrs" {
+  description = "CIDR blocks allowed to reach the public endpoint when enable_public_access is true. Always scope this to your own IP (e.g. [\"1.2.3.4/32\"]) — never leave it as 0.0.0.0/0."
+  type        = list(string)
+  default     = []
+}
+
 variable "tags" {
   description = "Tags to apply to resources"
   type        = map(string)
