@@ -94,18 +94,3 @@ resource "aws_eks_node_group" "main" {
     create_before_destroy = true
   }
 }
-
-# ============================================
-# Data Sources
-# ============================================
-
-# Get the latest AL2 AMI
-data "aws_ami" "eks_worker" {
-  filter {
-    name   = "name"
-    values = ["amazon-eks-node-${var.cluster_version}-*"]
-  }
-
-  most_recent = true
-  owners      = ["amazon"]
-}

@@ -26,9 +26,9 @@ variable "alb_controller_replicas" {
 }
 
 variable "alb_controller_chart_version" {
-  description = "Helm chart version for ALB controller"
+  description = "Helm chart version for ALB controller. Leave as null to always install the latest available chart version (recommended - avoids this pin going stale over time). Set to a specific version string (e.g. \"3.4.0\") only if you need to pin for compatibility reasons."
   type        = string
-  default     = "2.7.2"
+  default     = null
 }
 
 variable "tags" {
