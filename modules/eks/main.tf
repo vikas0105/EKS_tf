@@ -13,17 +13,18 @@ resource "aws_eks_cluster" "main" {
   vpc_config {
     subnet_ids               = var.subnet_ids
     endpoint_private_access  = true
-    # Defaults to false (private-only, per assignment spec). Toggle
-    # temporarily via -var flags when you need Terraform/kubectl/helm to
-    # reach the API from outside the VPC (e.g. plain CloudShell), then
-    # re-apply with the defaults to lock it back down:
-    #   terraform apply -var="enable_public_access=true" \
-    #     -var='public_access_cidrs=["<your-ip>/32"]'
-    #   ...then, once done...
-    #   terraform apply
+    # Root main.tf always passes enable_public_access = true, scoped to
+    # whoever is currently running `terraform apply` (auto-detected IP).
     endpoint_public_access   = var.enable_public_access
     public_access_cidrs      = var.enable_public_access ? var.public_access_cidrs : null
     security_group_ids       = var.security_group_ids
+  }
+
+  # Required for the aws_eks_access_entry / aws_eks_access_policy_association
+  # resources below to work at all — without this, the cluster only supports
+  # the legacy aws-auth ConfigMap and access-entry API calls are rejected.
+  access_config {
+    authentication_mode = "API_AND_CONFIG_MAP"
   }
 
   enabled_cluster_log_types = var.cluster_enabled_log_types
@@ -40,6 +41,38 @@ resource "aws_eks_cluster" "main" {
     aws_iam_role_policy_attachment.vpc_cni_policy,
     aws_cloudwatch_log_group.cluster
   ]
+}
+
+# ============================================
+# Grant the identity running Terraform cluster-admin access
+# ============================================
+# Fixes: "Error: Unauthorized" on kubernetes_service_account_v1 and any
+# other kubernetes/helm-provider resource. Reaching the API (network-wise)
+# isn't the same as being authorized inside Kubernetes RBAC — EKS doesn't
+# automatically grant that just because you created the cluster, unless
+# bootstrap_cluster_creator_admin_permissions was set at CREATE time (this
+# cluster predates that). This explicitly grants whoever's AWS credentials
+# are running `terraform apply` right now.
+data "aws_caller_identity" "current" {}
+
+resource "aws_eks_access_entry" "current_caller" {
+  cluster_name  = aws_eks_cluster.main.name
+  principal_arn = data.aws_caller_identity.current.arn
+  type          = "STANDARD"
+
+  depends_on = [aws_eks_cluster.main]
+}
+
+resource "aws_eks_access_policy_association" "current_caller_admin" {
+  cluster_name  = aws_eks_cluster.main.name
+  principal_arn = data.aws_caller_identity.current.arn
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+
+  access_scope {
+    type = "cluster"
+  }
+
+  depends_on = [aws_eks_access_entry.current_caller]
 }
 
 # ============================================
