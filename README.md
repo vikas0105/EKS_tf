@@ -140,3 +140,15 @@ export AWS_REGION="us-west-2"
 Nothing in the repo is ever modified. Safe to run as many times as you want, from as many sessions, regions, or machines as you want.
 
 > **Note on a harmless warning:** newer Terraform versions print `The parameter "dynamodb_table" is deprecated. Use parameter "use_lockfile" instead.` This is just Terraform nudging toward its newer native S3-locking mechanism (added in 1.11+) — the DynamoDB-based locking used here still works correctly on all Terraform versions, old and new. Safe to ignore.
+
+
+How to clone to cloud shell and run tf
+
+cd ~
+rm -rf EKS_tf
+git clone https://github.com/vikas0105/EKS_tf.git
+cd EKS_tf
+cp terraform.tfvars.example terraform.tfvars
+chmod +x bootstrap.sh
+./bootstrap.sh
+terraform plans
