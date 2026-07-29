@@ -25,18 +25,19 @@ cluster_version = "1.36"
 # Node Group Configuration
 # ============================================
 # EC2 instance type for nodes
-# Recommended: t3.medium (2 vCPU, 4GB RAM) for development
-# Production: t3.large or larger
-instance_type = "t3.medium"
+# t3.micro is Free Tier eligible - use this unless your AWS account
+# has Free Tier restrictions lifted (t3.medium will fail with
+# "InvalidParameterCombination - not eligible for Free Tier" otherwise)
+instance_type = "t3.micro"
 
 # Capacity type: ON_DEMAND or SPOT
 # Use ON_DEMAND for stability, SPOT for cost savings
 capacity_type = "ON_DEMAND"
 
 # Node scaling configuration
-node_group_min_size     = 1
-node_group_desired_size = 1
-node_group_max_size     = 1
+node_group_min_size     = 2
+node_group_desired_size = 3
+node_group_max_size     = 3
 
 # ============================================
 # Tags (Applied to all resources)
@@ -55,11 +56,11 @@ tags = {
 # aws_region = "us-west-2"
 
 # ============================================
-# Optional: For production
+# Optional: For production (larger, non-Free-Tier instances)
 # ============================================
 # environment = "prod"
 # cluster_version = "1.36"
-# instance_type = "t3.micro"
+# instance_type = "t3.large"
 # node_group_min_size = 2
 # node_group_desired_size = 3
 # node_group_max_size = 5
