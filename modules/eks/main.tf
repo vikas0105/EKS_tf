@@ -29,7 +29,8 @@ resource "aws_eks_cluster" "main" {
 
   depends_on = [
     aws_iam_role_policy_attachment.cluster_policy,
-    aws_iam_role_policy_attachment.vpc_cni_policy
+    aws_iam_role_policy_attachment.vpc_cni_policy,
+    aws_cloudwatch_log_group.cluster
   ]
 }
 
